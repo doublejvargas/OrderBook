@@ -32,7 +32,7 @@
     <ClInclude Include="api\obLevelInfo.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="api\obOrderBookLevelInfo.hpp">
+    <ClInclude Include="api\obOrderBookLevelInfos.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="api\obOrder.hpp">

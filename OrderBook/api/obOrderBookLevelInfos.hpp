@@ -12,6 +12,8 @@ namespace ob
 			, asks_ { asks }
 		{ }
 
+		// Getters
+		//  Notice that these getters return const objects that cannot be modified.
 		const LevelInfos& GetBids() const { return bids_; }
 		const LevelInfos& GetAsks() const { return asks_; }
 

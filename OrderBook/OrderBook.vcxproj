@@ -150,7 +150,7 @@
     <ClInclude Include="api\obOrderModify.hpp" />
     <ClInclude Include="api\obOrderType.hpp" />
     <ClInclude Include="api\obSide.hpp" />
-    <ClInclude Include="api\obOrderBookLevelInfo.hpp" />
+    <ClInclude Include="api\obOrderBookLevelInfos.hpp" />
     <ClInclude Include="api\obTrade.hpp" />
     <ClInclude Include="api\OrderBook.hpp" />
   </ItemGroup>
