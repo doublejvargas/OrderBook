@@ -143,6 +143,17 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="api\obAliases.hpp" />
+    <ClInclude Include="api\obLevelInfo.hpp" />
+    <ClInclude Include="api\obOrder.hpp" />
+    <ClInclude Include="api\obOrderModify.hpp" />
+    <ClInclude Include="api\obOrderType.hpp" />
+    <ClInclude Include="api\obSide.hpp" />
+    <ClInclude Include="api\obOrderBookLevelInfo.hpp" />
+    <ClInclude Include="api\obTrade.hpp" />
+    <ClInclude Include="api\OrderBook.hpp" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

@@ -13,5 +13,5 @@ namespace ob
 		Quantity quantity_;
 	};
 
-	using LevelInfos = std::vector<LevelInfo>;
+	//using LevelInfos = std::vector<LevelInfo>;
 }
