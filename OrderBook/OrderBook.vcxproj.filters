@@ -18,6 +18,9 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="api\obOrderBook.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="api\obAliases.hpp">
@@ -44,7 +47,7 @@
     <ClInclude Include="api\obTrade.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="api\OrderBook.hpp">
+    <ClInclude Include="api\obOrderBook.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
