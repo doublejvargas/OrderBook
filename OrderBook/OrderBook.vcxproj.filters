@@ -50,5 +50,8 @@
     <ClInclude Include="api\obOrderBook.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="api\obConstants.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

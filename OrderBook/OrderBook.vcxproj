@@ -146,6 +146,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="api\obAliases.hpp" />
+    <ClInclude Include="api\obConstants.hpp" />
     <ClInclude Include="api\obLevelInfo.hpp" />
     <ClInclude Include="api\obOrder.hpp" />
     <ClInclude Include="api\obOrderModify.hpp" />

@@ -11,6 +11,7 @@ namespace ob
 	using Price = std::int32_t;
 	using Quantity = std::uint32_t;
 	using OrderId = std::uint64_t;
+	using OrderIds = std::vector<OrderId>;
 
 	struct LevelInfo;
 	using LevelInfos = std::vector<LevelInfo>;

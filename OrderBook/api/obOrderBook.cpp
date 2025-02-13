@@ -1,7 +1,124 @@
 #include "api/obOrderBook.hpp"
 
+// lib
+#include <numeric>
+#include <chrono>
+
+
 namespace ob
 {
+	/*******************************************************************
+	*							Private API							   *
+	********************************************************************/
+	void OrderBook::PruneGoodForDayOrders()
+	{
+		using namespace std::chrono;
+		const auto end = hours(16); // 4pm (military time)
+
+		// Thread is looping
+		while (true)
+		{
+			// time_point value
+			const auto now = system_clock::now();
+			// converts time_point value to std::time_t
+			const auto now_c = system_clock::to_time_t(now);
+			std::tm now_parts{};
+			// converts time_t value pointed by now_parts into a calendar time and stores it in now_c.
+			localtime_s(&now_parts, &now_c); // TODO: might need to swap these variables
+
+			if (now_parts.tm_hour >= end.count()) //end.count() returns number of ticks for duration 'end'
+				now_parts.tm_mday += 1;
+
+			now_parts.tm_hour = end.count();
+			now_parts.tm_min = 0;
+			now_parts.tm_sec = 0;
+
+			auto next = system_clock::from_time_t(mktime(&now_parts));
+			auto till = next - now + milliseconds(100);
+
+			{
+				// It might be more appropriate to use a lock_guard here?  less overhead and the lock's use is pretty simple
+				std::unique_lock<std::mutex> ordersLock{ ordersMutex_ };
+
+				if (shutdown_.load(std::memory_order_acquire) or // if atomic variable shutdown has been signaled to true to stop the application
+					shutdownConditionVariable_.wait_for(ordersLock, till) == std::cv_status::no_timeout) // or if condition variable  was awakened by notify_all, notify_one or spuriously
+					return;  // return and do nothing, app is terminating.
+
+				// lock is released at the end of this scope by destructor
+			}
+
+			OrderIds orderIds;
+			{
+				std::scoped_lock<std::mutex> ordersLock{ ordersMutex_ };
+
+				// <OrderId, OrderEntry>
+				for (const auto& [_, entry] : orders_)
+				{
+					// <OrderPointer, OrderPointers::iterator>
+					const auto& [order, _] = entry;
+
+					if (order->GetOrderType() != OrderType::GoodForDay)
+						continue;
+
+					orderIds.push_back(order->GetOrderId());
+				}
+
+				// lock is unlocked at end of this scope by destructor
+			}
+
+			CancelOrders(orderIds);
+		}
+	}
+
+	bool OrderBook::CanFullyFill(Side side, Price price, Quantity quantity) const
+	{
+		if (!CanMatch(side, price))
+			return false;
+
+		std::optional<Price> threshold{};
+		
+		// If order is a buy, you want to set threshold to the LOWEST sell price
+		if (side == Side::Buy)
+		{
+			const auto [askPrice, _] = *asks_.begin();
+			threshold = askPrice;
+		}
+		// If order is a sell, you want to set threshold to the HIGHEST buy price
+		else
+		{
+			const auto [bidPrice, _] = *bids_.begin();
+			threshold = bidPrice;
+		}
+
+		for (const auto& [levelPrice, levelData] : data_)
+		{
+			// This if statement doesn't make sense to me yet, and I suspect he will change them in part three
+			// e.g. for a buy order, the lowest sell price being greater than the current price level of the bookkeeping container should not be an issue,
+			//   i.e, the current bookkeeping price level is a price that is CHEAPER, which is good for a buy order.
+			if (threshold.has_value() and
+				(side == Side::Buy and threshold.value() > levelPrice) or
+				(side == Side::Sell and threshold.value() < levelPrice))
+				continue;
+
+			/* If the order is a buy order and the current price level in the bookkeeping is greater than the price of interest of the order (because you don't want to buy more expensive)
+			*    OR
+			*  If the order is a sell order and the current price level in the bookkeeping is less than the price of interest of the order (because you don't want to sell more cheap)
+			* Then we do not care about this price level and we continue looping onto the next.
+			*/
+			if((side == Side::Buy and levelPrice > price) or
+				(side == Side::Sell and levelPrice < price))
+				continue;
+
+			if (quantity <= levelData.quantity_)
+				return true;
+
+			quantity -= levelData.quantity_;
+		}
+
+		return false;
+	}
+
+	
 	bool OrderBook::CanMatch(Side side, Price price) const 
 	{
 		if (side == Side::Buy)
@@ -78,6 +195,9 @@ namespace ob
 					TradeInfo{ bid->GetOrderId(), bid->GetPrice(), quantity },
 					TradeInfo{ ask->GetOrderId(), ask->GetPrice(), quantity }
 					});
+
+				OnOrderMatched(bid->GetPrice(), quantity, bid->IsFilled());
+				OnOrderMatched(ask->GetPrice(), quantity, ask->IsFilled());
 			}
 		}
 
@@ -101,39 +221,21 @@ namespace ob
 		return trades;
 	}
 
-	Trades OrderBook::AddOrder(OrderPointer order)
+	void OrderBook::CancelOrders(OrderIds orderIds)
 	{
-		/* Exit conditions */
-		if (orders_.contains(order->GetOrderId()))
-			return { };
+		// why scoped_lock here?
+		// mutex is only acquired once, regardless of the number of orders in orderIds
+		std::scoped_lock<std::mutex> ordersLock{ ordersMutex_ };
 
-		if (order->GetOrderType() == OrderType::FillAndKill and !CanMatch(order->GetSide(), order->GetPrice()))
-			return { };
-
-		OrderPointers::iterator it{};
-
-		if (order->GetSide() == Side::Buy)
-		{
-			// remember, this returns an 'OrderPointers' object, or a std::list<OrderPointer> object, to which we then add the order pointer below.
-			//  notice that orders is a reference, because we need to be able to mutate the list that is contained at the price level indicated by order->GetPrice().
-			auto& orders = bids_[order->GetPrice()];
-			orders.push_back(order);
-			// iterator is assigned to be the last element in the orders container (not 'orders.end()'), i.e, the element we just "pushed back".
-			//  this corresponds to the second element of an OrderEntry object, the "location".
-			it = std::next(orders.begin(), orders.size() - 1);
-		}
-		else
-		{
-			auto& orders = asks_[order->GetPrice()];
-			orders.push_back(order);
-			it = std::next(orders.begin(), orders.size() - 1);
-		}
-
-		orders_.insert({ order->GetOrderId(), OrderEntry{ order, it } }); // mutating internal map/state here.
-		return MatchOrders();
+		for (const auto& orderId : orderIds)
+			CancelOrderInternal(orderId);
 	}
 
-	void OrderBook::CancelOrder(OrderId orderId)
+	/*
+	* We refactor our previous CancelOrder function into a private CancelOrderInternal for the sake of avoiding
+	*	owning and releasing locks multiple times, which leads to cache incoherence/inefficiency.
+	*/
+	void OrderBook::CancelOrderInternal(OrderId orderId)
 	{
 		if (!orders_.contains(orderId))
 			return;
@@ -164,6 +266,125 @@ namespace ob
 			if (orders.empty())
 				bids_.erase(price);
 		}
+
+		OnOrderCancelled(order);
+	}
+
+	void OrderBook::OnOrderCancelled(OrderPointer order)
+	{
+		UpdateLevelData(order->GetPrice(), order->GetRemainingQuantity(), LevelData::Action::Remove);
+	}
+	
+	void OrderBook::OnOrderAdded(OrderPointer order)
+	{
+		UpdateLevelData(order->GetPrice(), order->GetInitialQuantity(), LevelData::Action::Add);
+	}
+
+	void OrderBook::OnOrderMatched(Price price, Quantity quantity, bool isFullyFilled)
+	{
+		UpdateLevelData(price, quantity, isFullyFilled ? LevelData::Action::Remove : LevelData::Action::Match);
+	}
+
+	void OrderBook::UpdateLevelData(Price price, Quantity quantity, LevelData::Action action)
+	{
+		auto& data = data_[price];
+
+		data.count_ += action == LevelData::Action::Remove ? -1 : action == LevelData::Action::Add ? 1 : 0;
+		if (action == LevelData::Action::Remove or action == LevelData::Action::Match)
+		{
+			data.quantity_ -= quantity;
+		}
+		else
+		{
+			data.quantity_ += quantity;
+		}
+
+		if (data.count_ == 0)
+			data_.erase(price);
+	}
+	
+
+	/*******************************************************************
+	*							Public API							   *
+	********************************************************************/
+
+	OrderBook::OrderBook()
+		: ordersPruneThread_{ [this]() { PruneGoodForDayOrders(); } }
+	{ }
+
+	OrderBook::~OrderBook()
+	{
+		shutdown_.store(true, std::memory_order_release);
+		shutdownConditionVariable_.notify_one();
+		ordersPruneThread_.join();
+	}
+
+	Trades OrderBook::AddOrder(OrderPointer order)
+	{
+		std::scoped_lock<std::mutex> ordersLock{ ordersMutex_ };
+
+		/* Exit condition */
+		if (orders_.contains(order->GetOrderId()))
+			return { };
+		
+		/********* Market Orders **********/
+		// We leverage our GoodTillCancel Orders to implement Market orders
+		if (order->GetOrderType() == OrderType::Market)
+		{
+			if (order->GetSide() == Side::Buy and !asks_.empty())
+			{
+				const auto& [worstAsk, _] = *asks_.rbegin();
+				order->ToGoodTillCancel(worstAsk);
+			}
+			else if (order->GetSide() == Side::Sell and !bids_.empty())
+			{
+				const auto& [worstBid, _] = *bids_.rbegin();
+				order->ToGoodTillCancel(worstBid);
+			}
+			else
+				return { };
+		}
+
+		/********* FillAndKill orders **********/
+		if (order->GetOrderType() == OrderType::FillAndKill and !CanMatch(order->GetSide(), order->GetPrice()))
+			return { };
+
+		/********* FillOrKill orders **********/
+		if (order->GetOrderType() == OrderType::FillOrKill and !CanFullyFill(order->GetSide(), order->GetPrice(), order->GetInitialQuantity()))
+			return { };
+
+		OrderPointers::iterator it{};
+
+		if (order->GetSide() == Side::Buy)
+		{
+			// remember, this returns an 'OrderPointers' object, or a std::list<OrderPointer> object, to which we then add the order pointer below.
+			//  notice that orders is a reference, because we need to be able to mutate the list that is contained at the price level indicated by order->GetPrice().
+			auto& orders = bids_[order->GetPrice()];
+			orders.push_back(order);
+			// iterator is assigned to be the last element in the orders container (not 'orders.end()'), i.e, the element we just "pushed back".
+			//  this corresponds to the second element of an OrderEntry object, the "location".
+			it = std::next(orders.begin(), orders.size() - 1);
+		}
+		else
+		{
+			auto& orders = asks_[order->GetPrice()];
+			orders.push_back(order);
+			it = std::next(orders.begin(), orders.size() - 1);
+		}
+
+		orders_.insert({ order->GetOrderId(), OrderEntry{ order, it } }); // mutating internal map/state here.
+
+		OnOrderAdded(order);
+		
+		return MatchOrders();
+	}
+
+	void OrderBook::CancelOrder(OrderId orderId)
+	{
+		// Why scoped_lock here?
+		std::scoped_lock<std::mutex> orderLocks{ ordersMutex_ };
+
+		CancelOrderInternal(orderId);
 	}
 
 	/* Modify Order method
