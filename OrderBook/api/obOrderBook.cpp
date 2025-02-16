@@ -185,12 +185,6 @@ namespace ob
 					orders_.erase(ask->GetOrderId());
 				}
 
-				if (bids.empty())
-					bids_.erase(bidPrice);
-
-				if (asks.empty())
-					asks_.erase(askPrice);
-
 				trades.push_back(Trade{
 					TradeInfo{ bid->GetOrderId(), bid->GetPrice(), quantity },
 					TradeInfo{ ask->GetOrderId(), ask->GetPrice(), quantity }
@@ -199,6 +193,12 @@ namespace ob
 				OnOrderMatched(bid->GetPrice(), quantity, bid->IsFilled());
 				OnOrderMatched(ask->GetPrice(), quantity, ask->IsFilled());
 			}
+
+			if (bids.empty())
+				bids_.erase(bidPrice);
+
+			if (asks.empty())
+				asks_.erase(askPrice);
 		}
 
 		// Don't forget to handle FillAndKill orders
@@ -241,7 +241,7 @@ namespace ob
 			return;
 
 		// 'order' is an OrderPointer object, 'it' is an OrderPointers::iterator object (See OrderEntry struct above, order_ and location_ fields respectively).
-		const auto& [order, it] = orders_.at(orderId); //O(1) access here, since orders_ is a dictionary/map =]
+		const auto [order, it] = orders_.at(orderId); //O(1) access here, since orders_ is a dictionary/map =]
 		// This statement merely removes this orderId entry from the dictionary, but remember that the values stored at this key are pointers,
 		//  and this pointers are not yet "destroyed" (since they are shared pointers, they are destroyed automatically once no more owners to the underlying object exist).
 		orders_.erase(orderId);
